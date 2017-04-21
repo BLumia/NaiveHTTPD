@@ -1,0 +1,10 @@
+# This is a configuration for BitBucket Pipelines (For continuous integration).
+# It does NOT means i did any work on unit test or integration test.
+# 
+image: gcc:6.1
+
+pipelines:
+  default:
+    - step:
+        script:
+          - make

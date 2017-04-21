@@ -40,22 +40,70 @@ void processArguments(int argc, char **argv) {
     }
 } 
 
+ssize_t fdgets(int socketfd, char* buffer, int size) {
+	
+	ssize_t received, i = 0;
+	char ch = '\0';
+	
+	while(i < (size - 1)) {
+		if (ch == '\n') break;
+		received = recv(socketfd, &ch, 1, 0);
+		if (received > 0) {
+			if (ch == '\r') { // CR LF -> LF, CR -> LF
+				received = recv(socketfd, &ch, 1, MSG_PEEK);
+				if (received > 0 && ch == '\n') recv(socketfd, &ch, 1, 0);
+				else ch = '\n';
+			}
+			buffer[i] = ch;
+			i++;
+		} else {
+			break;
+		}
+	}
+	
+	buffer[i] = '\0';
+	return i;
+}
+
 void doResponse(int socketfd) {
 	
-	static char buffer[BUFFER_SIZE+1];
+	char buffer[BUFFER_SIZE+1];
+	ssize_t readSize;
 	
-	printf("Accepted one hit!\n");
-	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n");
+	memset(buffer, 0, sizeof(buffer));
+	
+	// request
+	readSize = fdgets(socketfd,buffer,BUFFER_SIZE);
+	if(readSize <= 0) {
+		perror("Error when reading data from request");
+		close(socketfd);
+		exit(EXIT_FAILURE);
+	}
+	// since we don't need process other (may complex) method, just return 405 and exit. (why not 501?)
+	if(strncmp(buffer,"GET ",4) && strncmp(buffer,"get ",4)) {
+		sprintf(buffer,"HTTP/1.0 405 Method Not Allowed\r\nContent-Type: text/html\r\nContent-Length: 4\r\n\r\n405\n");
+		write(socketfd,buffer,strlen(buffer));
+		printf("Forbid: Not allowed method or other reason:%s\n",buffer);
+		exit(EXIT_FAILURE); // is that a kind of ... failure?
+	}
+	for(int i=4; i<BUFFER_SIZE; i++) {
+		if(buffer[i] == ' ') {
+			buffer[i] = '\0';
+			break;
+		}
+	}
+	
+	// response
+	printf("Accepted one hit, [%s]!\n", buffer);
+	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nContent-Length: 14\r\n\r\n");
 	write(socketfd,buffer,strlen(buffer));
 	sprintf(buffer,"<h1>hOi!</h1>\n");
 	write(socketfd,buffer,15);
-	/* 
-	if (send(socketfd, "Hello, world!\n", 14, 0) == -1) {
-		perror("Error: Sending response \n Reason: ");
-		close(socketfd);
-		exit(EXIT_SUCCESS);
-	}
-	*/ 
+	
+	// finally
+	close(socketfd);
+	exit(EXIT_SUCCESS);
+
 }
 
 int main(int argc, char **argv) {
@@ -63,6 +111,7 @@ int main(int argc, char **argv) {
 	// static variable will initialised by filling zeros
 	static struct sockaddr_in cli_addr; 
 	static struct sockaddr_in srv_addr; 
+	pid_t pid;
 	int listenfd, acceptfd; /* listenfd is the socket used for listening */
 	
 	// processing configurations and arguments
@@ -84,7 +133,7 @@ int main(int argc, char **argv) {
 	
 	// open socket and start listening
 	if ((listenfd = socket(AF_INET, SOCK_STREAM,0)) < 0) {
-		perror("Error: Socket can not be created\n Reason: ");
+		perror("Error: Socket can not be created\n Reason");
 		exit(EXIT_FAILURE);
 	}
 	
@@ -93,12 +142,12 @@ int main(int argc, char **argv) {
 	srv_addr.sin_addr.s_addr = htonl(INADDR_ANY); // should Listening at 0.0.0.0 (INADDR_ANY)
 	
 	if (bind(listenfd, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) <0) {
-		perror("Error: Socket bind failed \n Reason: ");
+		perror("Error: Socket bind failed \n Reason");
 		exit(EXIT_FAILURE);
 	} 
 	
 	if (listen(listenfd, BACKLOG) < 0) {
-		perror("Error: Socket listen failed \n Reason: ");
+		perror("Error: Socket listen failed \n Reason");
 		exit(EXIT_FAILURE);
 	}
 	
@@ -107,16 +156,27 @@ int main(int argc, char **argv) {
 	forever {
 		int addrLen = sizeof(cli_addr);
 		if ((acceptfd = accept(listenfd, (struct sockaddr *)&cli_addr, &addrLen)) < 0) {
-			perror("Error: Socket accept failed \n Reason: ");
+			perror("Error: Socket accept failed \n Reason");
 			exit(EXIT_FAILURE);
 		}
-		if(fork() < 0) {
-			perror("Error: Fork failed \n Reason: ");
+		pid = fork();
+		if(pid < 0) {
+			perror("Error: Fork failed \n Reason");
 			exit(EXIT_FAILURE);
 		} else {
 			// is there any problem with pid?
-			doResponse(acceptfd);
-			close(acceptfd);
+			if(!pid) { 
+				// child
+				printf("[%d]fork child for %d\n",pid, acceptfd);
+				close(listenfd);
+				doResponse(acceptfd); // never returns
+			} else { 
+				// parent
+				printf("[%d]fork parent\n",pid);
+				// TODO: maybe something wrong about this, if no Content-Length header not provided, page will infinity load for resource.
+				//       but #f4c8c024 don't have this issue (instead, both parent and child process will both response that request. that's a bug). 
+				//close(acceptfd); // don't close this or will get a conn reset. idk why. will figure out after the fucking final exam.
+			}
 		}
 	}
 	
