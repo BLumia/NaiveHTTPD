@@ -162,19 +162,21 @@ void doResponse(int socketfd) {
 	if(filefd == -1) {
 		fireError(socketfd, 403); // or maybe 404?
 	}
-	close(filefd); // do it tomorrow
+	struct stat fileStat;
+	fstat(filefd, &fileStat);
 	
 	// response
 	printf("Accepted one hit, [%s]!\n", buffer);
-	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nContent-Length: 14\r\n\r\n");
+	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n", contentTypeStr, fileStat.st_size);
 	write(socketfd,buffer,strlen(buffer));
-	sprintf(buffer,"<h1>hOi!</h1>\n");
-	write(socketfd,buffer,15);
+	while ((readSize = read(filefd, buffer, BUFFER_SIZE)) > 0 ) {
+		write(socketfd, buffer, readSize);
+	}
 	
 	// finally
+	close(filefd);
 	close(socketfd);
 	exit(EXIT_SUCCESS);
-
 }
 
 int main(int argc, char **argv) {
@@ -251,7 +253,5 @@ int main(int argc, char **argv) {
 		}
 	}
 	
-	
 	return 0;
-
 }
