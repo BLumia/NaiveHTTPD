@@ -5,40 +5,86 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <unistd.h> //#include <getopt.h>
 #include <netinet/in.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
 #define PATH_MAX 4096 
-#define BUFFER_SIZE 8096 //any reason about this amt? 
+#define BUFFER_SIZE 8096 // 8 KB
 #define forever for(;;)
 
 char WWW_PATH[PATH_MAX];
 int PORT = 8080;
 int BACKLOG = 10;
 
+typedef struct supportedFileType {
+	char* ext;
+	char* type;
+} FileType;
+
+typedef struct httpStatusCode {
+	int code;
+	char* desc;
+} StatusCode;
+
+FileType typeArr[] = {
+	{"*",   "application/octet-stream"}, // fallback
+	{"gif", "image/gif"}, 
+	{"jpg", "image/jpeg"}, 
+	{"jpeg","image/jpeg"}, 
+	{"png", "image/png"}, 
+	{"ico", "image/x-icon"}, 
+	{"htm", "text/html"}, 
+	{"html","text/html"}, 
+	{"mp3", "audio/mp3"}, // hey, PCM
+	{"wav", "audio/wav"},
+	{"ogg", "audio/ogg"},
+	{"zip", "application/zip"}, 
+	{"gz",  "application/x-gzip"}, 
+	{"tar", "application/x-tar"}
+};
+
+StatusCode statusArr[] = {
+	{200, "OK"}, 
+	{403, "Forbidden"}, 
+	{404, "Not Found"}, 
+	{405, "Method Not Allowed"}, 
+	{501, "Not Implemented"}
+};
+
 void processArguments(int argc, char **argv) {
 	int opt;
 	
 	while (~(opt = getopt(argc, argv, "d:D:p:P:hH"))) { 
 		switch(opt) {
-			case 'd':
-			case 'D':
+			case 'd': case 'D':
 				strcpy(WWW_PATH,optarg);
 				break;
-			case 'p':
-			case 'P':
+			case 'p': case 'P':
 				sscanf(optarg,"%d",&PORT);
 				break;
-			case 'h':
-			case 'H':
+			case 'h': case 'H':
 				printf("hint: naivehttpd -D/var/www/html -p80\n\n"
 					"\tNaive HTTPD is a naive web server\n\n");
 				break;
 		}
     }
 } 
+
+void fireError(int socketfd, int statusCode) {
+	
+	char buffer[BUFFER_SIZE+1], *statusStr;
+	statusStr = statusArr[0].desc;
+	for(int i=1; i < sizeof(statusArr); i++) {
+		if (statusArr[i].code == statusCode) statusStr = statusArr[i].desc;
+	}
+	
+	sprintf(buffer,"HTTP/1.0 %d %s\r\nContent-Type: text/html\r\nContent-Length: 4\r\n\r\n%d\n", statusCode, statusStr, statusCode);
+	write(socketfd,buffer,strlen(buffer));
+	exit(EXIT_FAILURE); // is that a kind of ... failure?
+}
 
 ssize_t fdgets(int socketfd, char* buffer, int size) {
 	
@@ -67,8 +113,9 @@ ssize_t fdgets(int socketfd, char* buffer, int size) {
 
 void doResponse(int socketfd) {
 	
-	char buffer[BUFFER_SIZE+1];
-	ssize_t readSize;
+	char buffer[BUFFER_SIZE+1], *contentTypeStr;
+	ssize_t readSize, bufferSize;
+	int filefd;
 	
 	memset(buffer, 0, sizeof(buffer));
 	
@@ -81,17 +128,41 @@ void doResponse(int socketfd) {
 	}
 	// since we don't need process other (may complex) method, just return 405 and exit. (why not 501?)
 	if(strncmp(buffer,"GET ",4) && strncmp(buffer,"get ",4)) {
-		sprintf(buffer,"HTTP/1.0 405 Method Not Allowed\r\nContent-Type: text/html\r\nContent-Length: 4\r\n\r\n405\n");
-		write(socketfd,buffer,strlen(buffer));
-		printf("Forbid: Not allowed method or other reason:%s\n",buffer);
-		exit(EXIT_FAILURE); // is that a kind of ... failure?
+		printf("Forbid: Not allowed method or other reason.\n");
+		fireError(socketfd, 405);
 	}
 	for(int i=4; i<BUFFER_SIZE; i++) {
+		// safe check for not allowed access out of the WWW_PATH
+		if(buffer[i] == '.' && buffer[i+1] == '.') {
+			// in fact it may cause problem if we use dots in get parameter, e.g. https://sample.domain/example.htm&hey=yooo..oo
+			printf("Forbid: Not allowed fetching path.\n");
+			fireError(socketfd, 403);
+		}
+		// do lazy work to get path string
 		if(buffer[i] == ' ') {
 			buffer[i] = '\0';
+			if (i == 5) { // lazy work: if requesting `/`, not work if requesting a sub folder.
+				strcpy(buffer,"GET /index.html");
+			}
 			break;
 		}
 	}
+	
+	bufferSize = strlen(buffer);
+	contentTypeStr = typeArr[0].type;
+	for(int i=1; i < sizeof(typeArr); i++) {
+		size_t sLen = strlen(typeArr[i].ext);
+		if(!strncmp(&buffer[bufferSize-sLen], typeArr[i].ext, sLen)) {
+			contentTypeStr = typeArr[i].type;
+			break;
+		}
+	}
+	
+	filefd = open(&buffer[5],O_RDONLY); // hey, we should uridecode ya.
+	if(filefd == -1) {
+		fireError(socketfd, 403); // or maybe 404?
+	}
+	close(filefd); // do it tomorrow
 	
 	// response
 	printf("Accepted one hit, [%s]!\n", buffer);
