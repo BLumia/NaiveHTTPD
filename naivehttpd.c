@@ -224,7 +224,7 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 	
-	printf("Server started.\n");
+	printf("Server started.\n\n"); fflush(stdout); // flush, or on msys it will not automatically flush the stream.
 	
 	forever {
 		int addrLen = sizeof(cli_addr);
