@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h> 
 #include <fcntl.h>
 #include <unistd.h> //#include <getopt.h>
 #include <netinet/in.h>
@@ -86,6 +87,29 @@ void fireError(int socketfd, int statusCode) {
 	exit(EXIT_FAILURE); // is that a kind of ... failure?
 }
 
+char hex2char(char ch) {
+	return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
+}
+
+char *genUrldecodedStr(char *pstr) {
+	char *buf = malloc(strlen(pstr) + 1), *pbuf = buf;
+	while (*pstr) {
+		if (*pstr == '%') {
+			if (pstr[1] && pstr[2]) {
+				*pbuf++ = hex2char(pstr[1]) << 4 | hex2char(pstr[2]);
+				pstr += 2;
+			}
+		} else if (*pstr == '+') { 
+			*pbuf++ = ' ';
+		} else {
+			*pbuf++ = *pstr;
+		}
+		pstr++;
+	}
+	*pbuf = '\0';
+	return buf;
+}
+
 ssize_t fdgets(int socketfd, char* buffer, int size) {
 	
 	ssize_t received, i = 0;
@@ -158,7 +182,9 @@ void doResponse(int socketfd) {
 		}
 	}
 	
-	filefd = open(&buffer[5],O_RDONLY); // hey, we should uridecode ya.
+	char* decodedUri = genUrldecodedStr(&buffer[5]);
+	filefd = open(decodedUri,O_RDONLY); 
+	free(decodedUri);
 	if(filefd == -1) {
 		fireError(socketfd, 403); // or maybe 404?
 	}
@@ -167,7 +193,7 @@ void doResponse(int socketfd) {
 	
 	// response
 	printf("Accepted one hit, [%s]!\n", buffer);
-	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n", contentTypeStr, fileStat.st_size);
+	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n\r\n", contentTypeStr, fileStat.st_size);
 	write(socketfd,buffer,strlen(buffer));
 	while ((readSize = read(filefd, buffer, BUFFER_SIZE)) > 0 ) {
 		write(socketfd, buffer, readSize);
@@ -248,7 +274,7 @@ int main(int argc, char **argv) {
 				printf("[%d]fork parent\n",pid);
 				// TODO: maybe something wrong about this, if no Content-Length header not provided, page will infinity load for resource.
 				//       but #f4c8c024 don't have this issue (instead, both parent and child process will both response that request. that's a bug). 
-				//close(acceptfd); // don't close this or will get a conn reset. idk why. will figure out after the fucking final exam.
+				//close(acceptfd); // don't close this or will get a conn reset. idk why. will figure out when i have spare time.
 			}
 		}
 	}
