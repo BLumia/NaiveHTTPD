@@ -13,6 +13,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include "httpdutils.h"
+#include "socketwrapper.h"
+
 #define PATH_MAX 4096 
 #define BUFFER_SIZE 8096 // 8 KB
 #define forever for(;;)
@@ -20,16 +23,6 @@
 char WWW_PATH[PATH_MAX];
 int PORT = 8080;
 int BACKLOG = 10;
-
-typedef struct supportedFileType {
-	char* ext;
-	char* type;
-} FileType;
-
-typedef struct httpStatusCode {
-	int code;
-	char* desc;
-} StatusCode;
 
 FileType typeArr[] = {
 	{"*",   "application/octet-stream"}, // fallback
@@ -85,55 +78,6 @@ void fireError(int socketfd, int statusCode) {
 	
 	sprintf(buffer,"HTTP/1.0 %d %s\r\nContent-Type: text/html\r\nContent-Length: 4\r\n\r\n%d\n", statusCode, statusStr, statusCode);
 	write(socketfd,buffer,strlen(buffer));
-	//exit(EXIT_FAILURE); // is that a kind of ... failure?
-}
-
-char hex2char(char ch) {
-	return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
-}
-
-char *genUrldecodedStr(char *pstr) {
-	char *buf = malloc(strlen(pstr) + 1), *pbuf = buf;
-	while (*pstr) {
-		if (*pstr == '%') {
-			if (pstr[1] && pstr[2]) {
-				*pbuf++ = hex2char(pstr[1]) << 4 | hex2char(pstr[2]);
-				pstr += 2;
-			}
-		} else if (*pstr == '+') { 
-			*pbuf++ = ' ';
-		} else {
-			*pbuf++ = *pstr;
-		}
-		pstr++;
-	}
-	*pbuf = '\0';
-	return buf;
-}
-
-ssize_t fdgets(int socketfd, char* buffer, int size) {
-	
-	ssize_t received, i = 0;
-	char ch = '\0';
-	
-	while(i < (size - 1)) {
-		if (ch == '\n') break;
-		received = recv(socketfd, &ch, 1, 0);
-		if (received > 0) {
-			if (ch == '\r') { // CR LF -> LF, CR -> LF
-				received = recv(socketfd, &ch, 1, MSG_PEEK);
-				if (received > 0 && ch == '\n') recv(socketfd, &ch, 1, 0);
-				else ch = '\n';
-			}
-			buffer[i] = ch;
-			i++;
-		} else {
-			break;
-		}
-	}
-	
-	buffer[i] = '\0';
-	return i;
 }
 
 void doResponse(int socketfd) {
@@ -234,8 +178,7 @@ int main(int argc, char **argv) {
 	}
 	
 	// open socket and start listening
-	if ((listenfd = socket(AF_INET, SOCK_STREAM,0)) < 0) {
-		perror("Error: Socket can not be created\n Reason");
+	if ((listenfd = Socket(AF_INET, SOCK_STREAM,0)) < 0) {
 		exit(EXIT_FAILURE);
 	}
 	
@@ -260,8 +203,7 @@ int main(int argc, char **argv) {
 	
 	forever {
 		int addrLen = sizeof(cli_addr);
-		if ((acceptfd = accept(listenfd, (struct sockaddr *)&cli_addr, &addrLen)) < 0) {
-			perror("Error: Socket accept failed \n Reason");
+		if ((acceptfd = Accept(listenfd, (struct sockaddr *)&cli_addr, &addrLen)) < 0) {
 			exit(EXIT_FAILURE);
 		}
 		
