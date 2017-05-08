@@ -240,7 +240,7 @@ int main(int argc, char **argv) {
 	}
 	
 	srv_addr.sin_family = AF_INET; // IPv4 Socket
-	srv_addr.sin_port = htons(PORT); // ¡¥\_(¥Ä)_/¡¥
+	srv_addr.sin_port = htons(PORT); // Ë‰\_(ãƒ„)_/Ë‰
 	srv_addr.sin_addr.s_addr = htonl(INADDR_ANY); // should Listening at 0.0.0.0 (INADDR_ANY)
 	
 	if (bind(listenfd, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) <0) {
@@ -265,7 +265,7 @@ int main(int argc, char **argv) {
 			exit(EXIT_FAILURE);
 		}
 		
-		if (pthread_create(&tid, NULL, doResponse, acceptfd) != 0)
+		if (pthread_create(&tid, &attr, doResponse, acceptfd) != 0)
             perror("pthread_create");
 		
 	}
