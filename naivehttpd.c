@@ -8,6 +8,7 @@
 #include <ctype.h> 
 #include <fcntl.h>
 #include <unistd.h> //#include <getopt.h>
+#include <pthread.h>
 #include <netinet/in.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -84,7 +85,7 @@ void fireError(int socketfd, int statusCode) {
 	
 	sprintf(buffer,"HTTP/1.0 %d %s\r\nContent-Type: text/html\r\nContent-Length: 4\r\n\r\n%d\n", statusCode, statusStr, statusCode);
 	write(socketfd,buffer,strlen(buffer));
-	exit(EXIT_FAILURE); // is that a kind of ... failure?
+	//exit(EXIT_FAILURE); // is that a kind of ... failure?
 }
 
 char hex2char(char ch) {
@@ -148,19 +149,19 @@ void doResponse(int socketfd) {
 	if(readSize <= 0) {
 		perror("Error when reading data from request");
 		close(socketfd);
-		exit(EXIT_FAILURE);
+		return;
 	}
 	// since we don't need process other (may complex) method, just return 405 and exit. (why not 501?)
 	if(strncmp(buffer,"GET ",4) && strncmp(buffer,"get ",4)) {
 		printf("Forbid: Not allowed method or other reason.\n");
-		fireError(socketfd, 405);
+		fireError(socketfd, 405);return;
 	}
 	for(int i=4; i<BUFFER_SIZE; i++) {
 		// safe check for not allowed access out of the WWW_PATH
 		if(buffer[i] == '.' && buffer[i+1] == '.') {
 			// in fact it may cause problem if we use dots in get parameter, e.g. https://sample.domain/example.htm&hey=yooo..oo
 			printf("Forbid: Not allowed fetching path.\n");
-			fireError(socketfd, 403);
+			fireError(socketfd, 403);return;
 		}
 		// do lazy work to get path string
 		if(buffer[i] == ' ') {
@@ -186,7 +187,7 @@ void doResponse(int socketfd) {
 	filefd = open(decodedUri,O_RDONLY); 
 	free(decodedUri);
 	if(filefd == -1) {
-		fireError(socketfd, 403); // or maybe 404?
+		fireError(socketfd, 403); return;// or maybe 404?
 	}
 	struct stat fileStat;
 	fstat(filefd, &fileStat);
@@ -200,9 +201,10 @@ void doResponse(int socketfd) {
 	}
 	
 	// finally
+	sleep(1);
 	close(filefd);
 	close(socketfd);
-	exit(EXIT_SUCCESS);
+	return;
 }
 
 int main(int argc, char **argv) {
@@ -210,7 +212,8 @@ int main(int argc, char **argv) {
 	// static variable will initialised by filling zeros
 	static struct sockaddr_in cli_addr; 
 	static struct sockaddr_in srv_addr; 
-	pid_t pid;
+	pthread_t tid;
+	pthread_attr_t attr;
 	int listenfd, acceptfd; /* listenfd is the socket used for listening */
 	
 	// processing configurations and arguments
@@ -250,6 +253,9 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 	
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	
 	printf("Server started.\n\n"); fflush(stdout); // flush, or on msys it will not automatically flush the stream.
 	
 	forever {
@@ -258,25 +264,10 @@ int main(int argc, char **argv) {
 			perror("Error: Socket accept failed \n Reason");
 			exit(EXIT_FAILURE);
 		}
-		pid = fork();
-		if(pid < 0) {
-			perror("Error: Fork failed \n Reason");
-			exit(EXIT_FAILURE);
-		} else {
-			// is there any problem with pid?
-			if(!pid) { 
-				// child
-				printf("[%d]fork child for %d\n",pid, acceptfd);
-				close(listenfd);
-				doResponse(acceptfd); // never returns
-			} else { 
-				// parent
-				printf("[%d]fork parent\n",pid);
-				// TODO: maybe something wrong about this, if no Content-Length header not provided, page will infinity load for resource.
-				//       but #f4c8c024 don't have this issue (instead, both parent and child process will both response that request. that's a bug). 
-				//close(acceptfd); // don't close this or will get a conn reset. idk why. will figure out when i have spare time.
-			}
-		}
+		
+		if (pthread_create(&tid, NULL, doResponse, acceptfd) != 0)
+            perror("pthread_create");
+		
 	}
 	
 	return 0;
