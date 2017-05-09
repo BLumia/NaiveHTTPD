@@ -80,9 +80,21 @@ void fireError(int socketfd, int statusCode) {
 	write(socketfd,buffer,strlen(buffer));
 }
 
+void doSimpleResponse(int socketfd) {
+	char buffer[BUFFER_SIZE+1];
+	//lseek(socketfd, 0, SEEK_END);
+	//setNonblocking(socketfd);
+	read(socketfd,buffer,BUFFER_SIZE); //??????????????????????????????????????????????????????
+	//printf("whence[%ld]\n",lseek(socketfd, 0, SEEK_CUR));
+	sprintf(buffer,"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n200\n");//\r\nContent-Length: 4
+	write(socketfd,buffer,strlen(buffer));
+	sleep(1);
+	close(socketfd);
+} 
+
 void doResponse(int socketfd) {
 	
-	char buffer[BUFFER_SIZE+1], *contentTypeStr;
+	char buffer[BUFFER_SIZE+1], buffer2[BUFFER_SIZE+1], *contentTypeStr;
 	ssize_t readSize, bufferSize;
 	int filefd;
 	
@@ -95,6 +107,7 @@ void doResponse(int socketfd) {
 		close(socketfd);
 		return;
 	}
+	read(socketfd,buffer2,BUFFER_SIZE); // unknown reason, why need this?
 	// since we don't need process other (may complex) method, just return 405 and exit. (why not 501?)
 	if(strncmp(buffer,"GET ",4) && strncmp(buffer,"get ",4)) {
 		printf("Forbid: Not allowed method or other reason.\n");
@@ -137,7 +150,7 @@ void doResponse(int socketfd) {
 	fstat(filefd, &fileStat);
 	
 	// response
-	printf("Accepted one hit, [%s]!\n", buffer);
+	printf("Accepted one hit, [%s]!\n", buffer); fflush(stdout);
 	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n\r\n", contentTypeStr, fileStat.st_size);
 	write(socketfd,buffer,strlen(buffer));
 	while ((readSize = read(filefd, buffer, BUFFER_SIZE)) > 0 ) {

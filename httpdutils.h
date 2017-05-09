@@ -59,3 +59,10 @@ ssize_t fdgets(int socketfd, char* buffer, int size) {
 	buffer[i] = '\0';
 	return i;
 }
+
+int setNonblocking(int fd) {  
+    int flags;
+    if ((flags = fcntl(fd, F_GETFL, 0)) == -1)  
+        flags = 0;  
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);  
+} 
