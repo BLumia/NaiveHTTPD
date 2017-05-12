@@ -82,61 +82,11 @@ void fireError(int socketfd, int statusCode) {
 
 void doSimpleResponse(int socketfd) {
 	char buffer[BUFFER_SIZE+1];
-	//lseek(socketfd, 0, SEEK_END);
-	//setNonblocking(socketfd);
-	read(socketfd,buffer,BUFFER_SIZE); //??????????????????????????????????????????????????????
-	//printf("whence[%ld]\n",lseek(socketfd, 0, SEEK_CUR));
+	read(socketfd,buffer,BUFFER_SIZE); 
 	sprintf(buffer,"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n200\n");//\r\nContent-Length: 4
 	write(socketfd,buffer,strlen(buffer));
 	sleep(1);
 	close(socketfd);
-} 
-
-RequestHeader* readRequestHeader(int socketfd) {
-	
-	ssize_t readSize;
-	RequestHeader* ret;
-	ret = malloc(sizeof(RequestHeader));
-	char buffer[BUFFER_SIZE+1], buffer2[BUFFER_SIZE+1];
-	
-	readSize = fdgets(socketfd,buffer,BUFFER_SIZE);
-	if(readSize <= 0) {
-		perror("Error when reading data from request");
-		close(socketfd);
-		return NULL;
-	}
-	// only GET
-	if(strncmp(buffer,"GET ",4) && strncmp(buffer,"get ",4)) {
-		ret->type = UNSUPPORTED;
-	} else {
-		ret->type = GET;
-	}
-	
-	for(int i=4; i<BUFFER_SIZE; i++) {
-		// safe check for not allowed access out of the WWW_PATH
-		if(buffer[i] == '.' && buffer[i+1] == '.') {
-			// in fact it may cause problem if we use dots in get parameter, e.g. https://sample.domain/example.htm&hey=yooo..oo
-			ret->responseCode = 403;
-			strcpy(buffer,"GET /index.html");
-			break;
-		}
-		// do lazy work to get path string
-		if(buffer[i] == ' ') {
-			buffer[i] = '\0';
-			if (i == 5) { // lazy work: if requesting `/`, not work if requesting a sub folder.
-				strcpy(buffer,"GET /index.html");
-			}
-			break;
-		}
-	}
-	
-	ret->url = genUrldecodedStr(&buffer[5]);
-	ret->responseCode = 200;
-	
-	// clean up read
-	read(socketfd,buffer2,BUFFER_SIZE);
-	
-	return ret;
 } 
 
 void doResponse(int socketfd) {
