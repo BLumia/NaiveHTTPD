@@ -2,6 +2,8 @@
 // BLumia (c) 2017
 // WTFPL
 
+enum RequestType {UNSUPPORTED, GET, POST, PUT, DELETE /*, BLAH */}; // we only support GET.
+
 typedef struct supportedFileType {
 	char* ext;
 	char* type;
@@ -11,6 +13,13 @@ typedef struct httpStatusCode {
 	int code;
 	char* desc;
 } StatusCode;
+
+typedef struct httpRequestHeader {
+	enum RequestType type;
+	char* url;
+	int responseCode;
+	// blah blah blah
+} RequestHeader;
 
 char hex2char(char ch) {
 	return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;

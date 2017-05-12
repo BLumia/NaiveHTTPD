@@ -92,33 +92,33 @@ void doSimpleResponse(int socketfd) {
 	close(socketfd);
 } 
 
-void doResponse(int socketfd) {
+RequestHeader* readRequestHeader(int socketfd) {
 	
-	char buffer[BUFFER_SIZE+1], buffer2[BUFFER_SIZE+1], *contentTypeStr;
-	ssize_t readSize, bufferSize;
-	int filefd;
+	ssize_t readSize;
+	RequestHeader* ret;
+	ret = malloc(sizeof(RequestHeader));
+	char buffer[BUFFER_SIZE+1], buffer2[BUFFER_SIZE+1];
 	
-	memset(buffer, 0, sizeof(buffer));
-	
-	// request
 	readSize = fdgets(socketfd,buffer,BUFFER_SIZE);
 	if(readSize <= 0) {
 		perror("Error when reading data from request");
 		close(socketfd);
-		return;
+		return NULL;
 	}
-	read(socketfd,buffer2,BUFFER_SIZE); // unknown reason, why need this?
-	// since we don't need process other (may complex) method, just return 405 and exit. (why not 501?)
+	// only GET
 	if(strncmp(buffer,"GET ",4) && strncmp(buffer,"get ",4)) {
-		printf("Forbid: Not allowed method or other reason.\n");
-		fireError(socketfd, 405);return;
+		ret->type = UNSUPPORTED;
+	} else {
+		ret->type = GET;
 	}
+	
 	for(int i=4; i<BUFFER_SIZE; i++) {
 		// safe check for not allowed access out of the WWW_PATH
 		if(buffer[i] == '.' && buffer[i+1] == '.') {
 			// in fact it may cause problem if we use dots in get parameter, e.g. https://sample.domain/example.htm&hey=yooo..oo
-			printf("Forbid: Not allowed fetching path.\n");
-			fireError(socketfd, 403);return;
+			ret->responseCode = 403;
+			strcpy(buffer,"GET /index.html");
+			break;
 		}
 		// do lazy work to get path string
 		if(buffer[i] == ' ') {
@@ -130,6 +130,38 @@ void doResponse(int socketfd) {
 		}
 	}
 	
+	ret->url = genUrldecodedStr(&buffer[5]);
+	ret->responseCode = 200;
+	
+	// clean up read
+	read(socketfd,buffer2,BUFFER_SIZE);
+	
+	return ret;
+} 
+
+void doResponse(int socketfd) {
+	
+	char buffer[BUFFER_SIZE+1], buffer2[BUFFER_SIZE+1], *contentTypeStr;
+	ssize_t bufferSize;
+	int filefd;
+	
+	memset(buffer, 0, sizeof(buffer));
+	
+	// request
+	RequestHeader* reqHdr;
+	reqHdr = readRequestHeader(socketfd);
+	
+	if(reqHdr->type != GET) {
+		printf("Forbid: Not allowed method or other reason.\n"); fflush(stdout);
+		fireError(socketfd, 405); return;
+	}
+	
+	if(reqHdr->responseCode != 200) {
+		printf("Forbid: Not allowed fetching path.\n"); fflush(stdout);
+		fireError(socketfd, 403); return;
+	}
+	
+	sprintf(buffer, "%s", reqHdr->url);
 	bufferSize = strlen(buffer);
 	contentTypeStr = typeArr[0].type;
 	for(int i=1; i < sizeof(typeArr); i++) {
@@ -139,8 +171,8 @@ void doResponse(int socketfd) {
 			break;
 		}
 	}
-	
-	char* decodedUri = genUrldecodedStr(&buffer[5]);
+
+	char* decodedUri = reqHdr->url;
 	filefd = open(decodedUri,O_RDONLY); 
 	free(decodedUri);
 	if(filefd == -1) {
@@ -153,12 +185,13 @@ void doResponse(int socketfd) {
 	printf("Accepted one hit, [%s]!\n", buffer); fflush(stdout);
 	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n\r\n", contentTypeStr, fileStat.st_size);
 	write(socketfd,buffer,strlen(buffer));
-	while ((readSize = read(filefd, buffer, BUFFER_SIZE)) > 0 ) {
-		write(socketfd, buffer, readSize);
+	while ((bufferSize = read(filefd, buffer, BUFFER_SIZE)) > 0 ) {
+		write(socketfd, buffer, bufferSize);
 	}
 	
 	// finally
 	sleep(1);
+	free(reqHdr);
 	close(filefd);
 	close(socketfd);
 	return;
@@ -196,7 +229,7 @@ int main(int argc, char **argv) {
 	}
 	
 	srv_addr.sin_family = AF_INET; // IPv4 Socket
-	srv_addr.sin_port = htons(PORT); // ˉ\_(ツ)_/ˉ
+	srv_addr.sin_port = htons(PORT); // ˉ\_(�?_/ˉ
 	srv_addr.sin_addr.s_addr = htonl(INADDR_ANY); // should Listening at 0.0.0.0 (INADDR_ANY)
 	
 	if (bind(listenfd, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) <0) {
