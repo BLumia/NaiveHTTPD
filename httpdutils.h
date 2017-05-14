@@ -4,7 +4,9 @@
 
 #define BUFFER_SIZE 8096 // 8 KB
 
-enum RequestType {UNSUPPORTED, GET, POST, PUT, DELETE /*, BLAH */}; // we only support GET.
+int LOG_LEVEL = 1; // 2 = verbose, 1 = info, 0 = no log
+
+enum RequestType {UNSUPPORTED, GET, POST, PUT, DELETE, EPOLLFD /*, BLAH */}; // we only support GET.
 
 typedef struct supportedFileType {
 	char* ext;
@@ -17,11 +19,24 @@ typedef struct httpStatusCode {
 } StatusCode;
 
 typedef struct httpRequestHeader {
+	int fd;
 	enum RequestType type;
 	char* url;
 	int responseCode;
 	// blah blah blah
 } RequestHeader;
+
+char hex2char(char ch);
+char *genUrldecodedStr(char *pstr);
+ssize_t fdgets(int socketfd, char* buffer, int size);
+int setNonblocking(int fd);
+int epollEventCtl(int epollfd, int socketfd, int event, int operation, void *ptr);
+void doSimpleResponse(int socketfd);
+void handleAccept(int epollfd, int socketfd);
+void handleRead(int epollfd, void* ptr);
+void handleWrite(int epollfd, void* ptr);
+RequestHeader* genRequestHeader(int socketfd);
+RequestHeader* readRequestHeader(int socketfd);
 
 char hex2char(char ch) {
 	return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
@@ -78,6 +93,83 @@ int setNonblocking(int fd) {
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);  
 } 
 
+int epollEventCtl(int epollfd, int socketfd, int event, int operation, void *ptr) {
+	struct epoll_event ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.events = event;
+	ev.data.ptr = ptr;
+	int r = epoll_ctl(epollfd, operation, socketfd, &ev);
+	return r;
+}
+
+void doSimpleResponse(int socketfd) {
+	char buffer[BUFFER_SIZE+1];
+	read(socketfd,buffer,BUFFER_SIZE); 
+	sprintf(buffer,"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\nContent-Length: 4\r\n\r\n200\n");//\r\nContent-Length: 4
+	write(socketfd,buffer,strlen(buffer));
+	sleep(1);
+	close(socketfd);
+} 
+
+void handleAccept(int epollfd, int socketfd) {
+	struct sockaddr_in raddr;
+	socklen_t rsize = sizeof(raddr);
+	int acceptfd = accept(socketfd, (struct sockaddr*)&raddr, &rsize);
+	if (acceptfd < 0) {
+		perror("Error: Accept failed.\n Reason");
+		exit(1);
+	}
+	struct sockaddr_in local;
+	if (LOG_LEVEL >= 2) {
+		printf("Accepted a connection from %s\n", inet_ntoa(raddr.sin_addr)); fflush(stdout);
+	}
+	setNonblocking(acceptfd);
+	
+	RequestHeader* reqHdr;
+	reqHdr = genRequestHeader(acceptfd);
+	
+	epollEventCtl(epollfd, acceptfd, EPOLLIN|EPOLLOUT|EPOLLET, EPOLL_CTL_ADD, reqHdr);
+}
+
+void handleRead(int epollfd, void* ptr) {
+	RequestHeader* dataptr = ptr;
+	char buffer[BUFFER_SIZE+1];
+	int socketfd = dataptr->fd;
+	
+	RequestHeader* reqHdr;
+	reqHdr = readRequestHeader(socketfd);
+	
+	free(ptr);
+	
+	epollEventCtl(epollfd, socketfd, EPOLLIN|EPOLLOUT|EPOLLET, EPOLL_CTL_ADD, reqHdr);
+	
+    close(socketfd);
+}
+
+void handleWrite(int epollfd, void* ptr) {
+	RequestHeader* dataptr = ptr;
+	char buffer[BUFFER_SIZE+1];
+	int socketfd = dataptr->fd;
+	
+	doSimpleResponse(socketfd);
+	
+	free(ptr);
+    close(socketfd);
+}
+
+RequestHeader* genRequestHeader(int socketfd) {
+	
+	RequestHeader* ret;
+	ret = malloc(sizeof(RequestHeader));
+	
+	ret->type = EPOLLFD;
+	ret->responseCode = 403; // nya
+	ret->url = NULL;
+	ret->fd = socketfd;
+	
+	return ret;
+} 
+
 RequestHeader* readRequestHeader(int socketfd) {
 	
 	ssize_t readSize;
@@ -116,6 +208,7 @@ RequestHeader* readRequestHeader(int socketfd) {
 		}
 	}
 	
+	ret->fd = socketfd;
 	ret->url = genUrldecodedStr(&buffer[5]);
 	ret->responseCode = 200;
 	

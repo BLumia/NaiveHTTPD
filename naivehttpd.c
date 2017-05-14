@@ -7,11 +7,14 @@
 #include <string.h>
 #include <ctype.h> 
 #include <fcntl.h>
-#include <unistd.h> //#include <getopt.h>
+#include <unistd.h> 
+#include <getopt.h>
 #include <pthread.h>
 #include <netinet/in.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/epoll.h>
 
 #include "httpdutils.h"
 #include "socketwrapper.h"
@@ -52,7 +55,7 @@ StatusCode statusArr[] = {
 void processArguments(int argc, char **argv) {
 	int opt;
 	
-	while (~(opt = getopt(argc, argv, "d:D:p:P:hH"))) { 
+	while (~(opt = getopt(argc, argv, "d:D:p:P:hHvV"))) { 
 		switch(opt) {
 			case 'd': case 'D':
 				strcpy(WWW_PATH,optarg);
@@ -62,7 +65,11 @@ void processArguments(int argc, char **argv) {
 				break;
 			case 'h': case 'H':
 				printf("hint: naivehttpd -D/var/www/html -p80\n\n"
-					"\tNaive HTTPD is a naive web server\n\n");
+					"\tNaive HTTPD is a naive web server\n\n");  fflush(stdout);
+				break;
+			case 'v': case 'V':
+				LOG_LEVEL = 1;
+				printf("Verbose log enabled\n"); fflush(stdout);
 				break;
 		}
     }
@@ -80,18 +87,9 @@ void fireError(int socketfd, int statusCode) {
 	write(socketfd,buffer,strlen(buffer));
 }
 
-void doSimpleResponse(int socketfd) {
-	char buffer[BUFFER_SIZE+1];
-	read(socketfd,buffer,BUFFER_SIZE); 
-	sprintf(buffer,"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n200\n");//\r\nContent-Length: 4
-	write(socketfd,buffer,strlen(buffer));
-	sleep(1);
-	close(socketfd);
-} 
-
 void doResponse(int socketfd) {
 	
-	char buffer[BUFFER_SIZE+1], buffer2[BUFFER_SIZE+1], *contentTypeStr;
+	char buffer[BUFFER_SIZE+1], *contentTypeStr;
 	ssize_t bufferSize;
 	int filefd;
 	
@@ -132,7 +130,9 @@ void doResponse(int socketfd) {
 	fstat(filefd, &fileStat);
 	
 	// response
-	printf("Accepted one hit, [%s]!\n", buffer); fflush(stdout);
+	if (LOG_LEVEL >= 2) {
+		printf("Responsed one hit, [%s]!\n", buffer); fflush(stdout);
+	}
 	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n\r\n", contentTypeStr, fileStat.st_size);
 	write(socketfd,buffer,strlen(buffer));
 	while ((bufferSize = read(filefd, buffer, BUFFER_SIZE)) > 0 ) {
@@ -150,11 +150,10 @@ void doResponse(int socketfd) {
 int main(int argc, char **argv) {
 	
 	// static variable will initialised by filling zeros
-	static struct sockaddr_in cli_addr; 
 	static struct sockaddr_in srv_addr; 
 	pthread_t tid;
 	pthread_attr_t attr;
-	int listenfd, acceptfd; /* listenfd is the socket used for listening */
+	int listenfd, epollfd;
 	
 	// processing configurations and arguments
 	processArguments(argc, argv);
@@ -164,7 +163,7 @@ int main(int argc, char **argv) {
 	
 	if (chdir(WWW_PATH) == -1) { 
 		printf("Error: Can not change to directory '%s'\n", WWW_PATH);
-		perror("Reason: ");
+		perror("Reason");
 		exit(EXIT_FAILURE);
 	}
 	
@@ -195,17 +194,43 @@ int main(int argc, char **argv) {
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	
-	printf("Server started.\n\n"); fflush(stdout); // flush, or on msys it will not automatically flush the stream.
+	epollfd = epoll_create1(0);
+	if (epollfd < 0) {
+		perror("Error: Epoll create failed \n Reason");
+		exit(EXIT_FAILURE);
+	} 
+	setNonblocking(listenfd);
+	RequestHeader* epollfdDataPtr;
+	epollfdDataPtr = genRequestHeader(epollfd);
+	epollEventCtl(epollfd, listenfd, EPOLLIN, EPOLL_CTL_ADD, epollfdDataPtr);
+	
+	printf("Server started.\n\n"); fflush(stdout); 
 	
 	forever {
-		int addrLen = sizeof(cli_addr);
-		if ((acceptfd = Accept(listenfd, (struct sockaddr *)&cli_addr, &addrLen)) < 0) {
-			exit(EXIT_FAILURE);
+		const int kMaxEvents = 20;
+		struct epoll_event activeEvtPool[100];
+		int evtCnt = epoll_wait(epollfd, activeEvtPool, kMaxEvents, 10000/*waitms*/);
+		if(LOG_LEVEL >= 1) {
+			printf("epoll_wait return %d events.\n", evtCnt); fflush(stdout);
 		}
-		
-		if (pthread_create(&tid, &attr, doResponse, acceptfd) != 0)
-            perror("pthread_create");
-		
+		if(evtCnt == -1) perror("wait");
+		for (int i = 0; i < evtCnt; i++) {
+			int events = activeEvtPool[i].events;
+			RequestHeader* reqHdr = (RequestHeader*) activeEvtPool[i].data.ptr;
+			int fd = reqHdr->fd;
+			if (events & (EPOLLIN | EPOLLERR)) {
+				if (fd == listenfd) {
+					handleAccept(epollfd, fd);
+				} else {
+					handleRead(epollfd, reqHdr);
+				}
+			} else if (events & EPOLLOUT) {
+				if(LOG_LEVEL >= 2) printf("handling epollout\n");
+				handleWrite(epollfd, reqHdr);
+			} else {
+				//unknown event
+			}
+		}
 	}
 	
 	return 0;
