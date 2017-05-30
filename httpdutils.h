@@ -205,7 +205,7 @@ void doResponse(int socketfd, RequestHeader* reqHdr) {
 	// finally
 	//sleep(1);
 	//free(reqHdr); // free outside
-	//close(filefd);
+	close(filefd);
 	//close(socketfd);
 	return;
 }
@@ -269,19 +269,6 @@ void handleWrite(int epollfd, void* ptr) {
 	free(ptr);
     close(socketfd);
 }
-
-RequestHeader* genRequestHeader(int socketfd) {
-	
-	RequestHeader* ret;
-	ret = malloc(sizeof(RequestHeader));
-	
-	ret->type = EPOLLFD;
-	ret->responseCode = 403; // nya
-	ret->url = NULL;
-	ret->fd = socketfd;
-	
-	return ret;
-} 
 
 RequestHeader* readRequestHeader(int socketfd) {
 	

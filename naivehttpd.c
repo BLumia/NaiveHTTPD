@@ -49,7 +49,7 @@ void processArguments(int argc, char **argv) {
     }
 } 
 
-static int create_and_bind(int portNum) {
+int create_and_bind(int portNum) {
     static struct sockaddr_in srv_addr; 
     int listenfd;
     // open socket and start listening
@@ -195,8 +195,6 @@ int main (int argc, char *argv[]) {
             }
         }
     }
-
-    //free (events);
 
     close (listenfd);
 

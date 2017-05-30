@@ -1,5 +1,5 @@
 CC = gcc
 all: 
-	$(CC) -o naivehttpd.exe -Wall naivehttpd.c -lpthread -std=c11
+	$(CC) -o naivehttpd.elf -Wall naivehttpd.c -lpthread -std=c11
 clean:
-	rm naivehttpd.exe
+	rm naivehttpd.elf
