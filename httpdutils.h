@@ -2,6 +2,8 @@
 // BLumia (c) 2017
 // WTFPL
 
+#include <errno.h>
+
 #define BUFFER_SIZE 8096 // 8 KB
 
 int LOG_LEVEL = 1; // 2 = verbose, 1 = info, 0 = no log
@@ -26,6 +28,31 @@ typedef struct httpRequestHeader {
 	// blah blah blah
 } RequestHeader;
 
+FileType typeArr[] = {
+	{"*",   "application/octet-stream"}, // fallback
+	{"gif", "image/gif"}, 
+	{"jpg", "image/jpeg"}, 
+	{"jpeg","image/jpeg"}, 
+	{"png", "image/png"}, 
+	{"ico", "image/x-icon"}, 
+	{"htm", "text/html"}, 
+	{"html","text/html"}, 
+	{"mp3", "audio/mp3"}, // hey, PCM
+	{"wav", "audio/wav"},
+	{"ogg", "audio/ogg"},
+	{"zip", "application/zip"}, 
+	{"gz",  "application/x-gzip"}, 
+	{"tar", "application/x-tar"}
+};
+
+StatusCode statusArr[] = {
+	{200, "OK"}, 
+	{403, "Forbidden"}, 
+	{404, "Not Found"}, 
+	{405, "Method Not Allowed"}, 
+	{501, "Not Implemented"}
+};
+
 char hex2char(char ch);
 char *genUrldecodedStr(char *pstr);
 ssize_t fdgets(int socketfd, char* buffer, int size);
@@ -37,6 +64,18 @@ void handleRead(int epollfd, void* ptr);
 void handleWrite(int epollfd, void* ptr);
 RequestHeader* genRequestHeader(int socketfd);
 RequestHeader* readRequestHeader(int socketfd);
+
+void fireError(int socketfd, int statusCode) {
+	
+	char buffer[BUFFER_SIZE+1], *statusStr;
+	statusStr = statusArr[0].desc;
+	for(int i=1; i < sizeof(statusArr); i++) {
+		if (statusArr[i].code == statusCode) statusStr = statusArr[i].desc;
+	}
+	
+	sprintf(buffer,"HTTP/1.0 %d %s\r\nContent-Type: text/html\r\nContent-Length: 4\r\n\r\n%d\n", statusCode, statusStr, statusCode);
+	write(socketfd,buffer,strlen(buffer));
+}
 
 char hex2char(char ch) {
 	return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
@@ -111,24 +150,100 @@ void doSimpleResponse(int socketfd) {
 	//close(socketfd);
 } 
 
-void handleAccept(int epollfd, int socketfd) {
-	struct sockaddr_in raddr;
-	socklen_t rsize = sizeof(raddr);
-	int acceptfd = accept(socketfd, (struct sockaddr*)&raddr, &rsize);
-	if (acceptfd < 0) {
-		perror("Error: Accept failed.\n Reason");
-		exit(1);
+void doResponse(int socketfd, RequestHeader* reqHdr) {
+	
+	char buffer[BUFFER_SIZE+1], *contentTypeStr;
+	ssize_t bufferSize;
+	int filefd;
+	
+	memset(buffer, 0, sizeof(buffer));
+	
+	// request
+	//RequestHeader* reqHdr;
+	//reqHdr = readRequestHeader(socketfd);
+	
+	if(reqHdr->type != GET) {
+		printf("Forbid: Not allowed method or other reason.\n"); fflush(stdout);
+		fireError(socketfd, 405); return;
 	}
-	struct sockaddr_in local;
+	
+	if(reqHdr->responseCode != 200) {
+		printf("Forbid: Not allowed fetching path.\n"); fflush(stdout);
+		fireError(socketfd, 403); return;
+	}
+	
+	sprintf(buffer, "%s", reqHdr->url);
+	bufferSize = strlen(buffer);
+	contentTypeStr = typeArr[0].type;
+	for(int i=1; i < sizeof(typeArr); i++) {
+		size_t sLen = strlen(typeArr[i].ext);
+		if(!strncmp(&buffer[bufferSize-sLen], typeArr[i].ext, sLen)) {
+			contentTypeStr = typeArr[i].type;
+			break;
+		}
+	}
+
+	char* decodedUri = reqHdr->url;
+	filefd = open(decodedUri,O_RDONLY); 
+	free(decodedUri);
+	if(filefd == -1) {
+		fireError(socketfd, 403); return;// or maybe 404?
+	}
+	struct stat fileStat;
+	fstat(filefd, &fileStat);
+	
+	// response
 	if (LOG_LEVEL >= 2) {
-		printf("Accepted a connection from %s\n", inet_ntoa(raddr.sin_addr)); fflush(stdout);
+		printf("Responsed one hit, [%s]!\n", buffer); fflush(stdout);
 	}
-	setNonblocking(acceptfd);
+	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n\r\n", contentTypeStr, fileStat.st_size);
+	write(socketfd,buffer,strlen(buffer));
+	while ((bufferSize = read(filefd, buffer, BUFFER_SIZE)) > 0 ) {
+		write(socketfd, buffer, bufferSize);
+	}
 	
-	RequestHeader* reqHdr;
-	reqHdr = genRequestHeader(acceptfd);
-	
-	epollEventCtl(epollfd, acceptfd, EPOLLIN|EPOLLET, EPOLL_CTL_ADD, reqHdr);
+	// finally
+	//sleep(1);
+	//free(reqHdr); // free outside
+	//close(filefd);
+	//close(socketfd);
+	return;
+}
+
+void handleAccept(int epollfd, int socketfd) {
+	struct epoll_event event;
+	while (1) {
+		struct sockaddr in_addr;
+		socklen_t in_len = sizeof(in_addr);
+		int acceptfd = accept (socketfd, &in_addr, &in_len);
+		if (acceptfd == -1) {
+			printf("errno=%d, EAGAIN=%d, EWOULDBLOCK=%d\n", errno, EAGAIN, EWOULDBLOCK);
+			if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+				/* We have processed all incoming
+				* connections. */
+				printf ("processed all incoming connections.\n");
+				break;
+			} else {
+				perror ("accept");
+				break;
+			}
+		}
+
+		/* Make the incoming socket non-blocking and add it to the
+		* list of fds to monitor. */
+		setNonblocking (acceptfd);
+
+		event.data.fd = acceptfd;
+		event.events = EPOLLIN | EPOLLET;
+		if (LOG_LEVEL >= 2) {
+			printf("set events %u, acceptfd=%d\n", event.events, acceptfd);
+		}
+		
+		if (epoll_ctl (epollfd, EPOLL_CTL_ADD, acceptfd, &event) == -1) {
+			perror ("epoll_ctl");
+			abort();
+		}
+	}
 }
 
 void handleRead(int epollfd, void* ptr) {
@@ -212,7 +327,7 @@ RequestHeader* readRequestHeader(int socketfd) {
 	ret->responseCode = 200;
 	
 	// clean up read
-	read(socketfd,buffer2,BUFFER_SIZE);
+	//read(socketfd,buffer2,BUFFER_SIZE);
 	
 	return ret;
 } 
