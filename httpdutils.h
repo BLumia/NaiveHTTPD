@@ -107,8 +107,8 @@ void doSimpleResponse(int socketfd) {
 	read(socketfd,buffer,BUFFER_SIZE); 
 	sprintf(buffer,"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\nContent-Length: 4\r\n\r\n200\n");//\r\nContent-Length: 4
 	write(socketfd,buffer,strlen(buffer));
-	sleep(1);
-	close(socketfd);
+	//sleep(1);
+	//close(socketfd);
 } 
 
 void handleAccept(int epollfd, int socketfd) {
@@ -128,12 +128,11 @@ void handleAccept(int epollfd, int socketfd) {
 	RequestHeader* reqHdr;
 	reqHdr = genRequestHeader(acceptfd);
 	
-	epollEventCtl(epollfd, acceptfd, EPOLLIN|EPOLLOUT|EPOLLET, EPOLL_CTL_ADD, reqHdr);
+	epollEventCtl(epollfd, acceptfd, EPOLLIN|EPOLLET, EPOLL_CTL_ADD, reqHdr);
 }
 
 void handleRead(int epollfd, void* ptr) {
 	RequestHeader* dataptr = ptr;
-	char buffer[BUFFER_SIZE+1];
 	int socketfd = dataptr->fd;
 	
 	RequestHeader* reqHdr;
@@ -141,9 +140,7 @@ void handleRead(int epollfd, void* ptr) {
 	
 	free(ptr);
 	
-	epollEventCtl(epollfd, socketfd, EPOLLIN|EPOLLOUT|EPOLLET, EPOLL_CTL_ADD, reqHdr);
-	
-    close(socketfd);
+	epollEventCtl(epollfd, socketfd, EPOLLOUT|EPOLLET, EPOLL_CTL_ADD, reqHdr);
 }
 
 void handleWrite(int epollfd, void* ptr) {
@@ -152,6 +149,7 @@ void handleWrite(int epollfd, void* ptr) {
 	int socketfd = dataptr->fd;
 	
 	doSimpleResponse(socketfd);
+	epollEventCtl(epollfd, socketfd, EPOLLIN|EPOLLOUT|EPOLLET, EPOLL_CTL_DEL, NULL);
 	
 	free(ptr);
     close(socketfd);
@@ -179,6 +177,7 @@ RequestHeader* readRequestHeader(int socketfd) {
 	
 	readSize = fdgets(socketfd,buffer,BUFFER_SIZE);
 	if(readSize <= 0) {
+		printf("When processing fd %d :\n", socketfd);
 		perror("Error when reading data from request");
 		close(socketfd);
 		return NULL;

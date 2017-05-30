@@ -68,7 +68,7 @@ void processArguments(int argc, char **argv) {
 					"\tNaive HTTPD is a naive web server\n\n");  fflush(stdout);
 				break;
 			case 'v': case 'V':
-				LOG_LEVEL = 1;
+				LOG_LEVEL = 2;
 				printf("Verbose log enabled\n"); fflush(stdout);
 				break;
 		}
@@ -140,10 +140,10 @@ void doResponse(int socketfd) {
 	}
 	
 	// finally
-	sleep(1);
-	free(reqHdr);
+	//sleep(1);
+	//free(reqHdr); // free outside
 	close(filefd);
-	close(socketfd);
+	//close(socketfd);
 	return;
 }
 
@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
 	}
 	
 	srv_addr.sin_family = AF_INET; // IPv4 Socket
-	srv_addr.sin_port = htons(PORT); // ˉ\_(�?_/ˉ
+	srv_addr.sin_port = htons(PORT); // ˉ\_(�?_/ˉ
 	srv_addr.sin_addr.s_addr = htonl(INADDR_ANY); // should Listening at 0.0.0.0 (INADDR_ANY)
 	
 	if (bind(listenfd, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) <0) {
@@ -202,7 +202,8 @@ int main(int argc, char **argv) {
 	setNonblocking(listenfd);
 	RequestHeader* epollfdDataPtr;
 	epollfdDataPtr = genRequestHeader(epollfd);
-	epollEventCtl(epollfd, listenfd, EPOLLIN, EPOLL_CTL_ADD, epollfdDataPtr);
+	if(LOG_LEVEL >= 2) {printf("listenfd: %d\n", listenfd); fflush(stdout);}
+	epollEventCtl(epollfd, listenfd, EPOLLIN | EPOLLET, EPOLL_CTL_ADD, epollfdDataPtr);
 	
 	printf("Server started.\n\n"); fflush(stdout); 
 	
@@ -213,22 +214,26 @@ int main(int argc, char **argv) {
 		if(LOG_LEVEL >= 1) {
 			printf("epoll_wait return %d events.\n", evtCnt); fflush(stdout);
 		}
-		if(evtCnt == -1) perror("wait");
+		if(evtCnt == -1) {
+			perror("wait");
+			exit(EXIT_FAILURE);
+		}
 		for (int i = 0; i < evtCnt; i++) {
 			int events = activeEvtPool[i].events;
 			RequestHeader* reqHdr = (RequestHeader*) activeEvtPool[i].data.ptr;
 			int fd = reqHdr->fd;
-			if (events & (EPOLLIN | EPOLLERR)) {
-				if (fd == listenfd) {
-					handleAccept(epollfd, fd);
-				} else {
-					handleRead(epollfd, reqHdr);
-				}
-			} else if (events & EPOLLOUT) {
-				if(LOG_LEVEL >= 2) printf("handling epollout\n");
-				handleWrite(epollfd, reqHdr);
+			if ((events & EPOLLERR) || (events & EPOLLHUP) || (!(events & EPOLLIN))) {
+				printf("unknown event %u\n", events); fflush(stdout);
+				close(fd);
+				//should i free reqHdr?
+			} else if (listenfd == fd) {
+				if(LOG_LEVEL >= 2) {printf("handling Accept\n"); fflush(stdout);}
+				handleAccept(epollfd, fd);
 			} else {
-				//unknown event
+				if(LOG_LEVEL >= 2) {printf("handling RW\n"); fflush(stdout);}
+				handleRead(epollfd, reqHdr);
+				handleWrite(epollfd, reqHdr);
+				close(fd);
 			}
 		}
 	}
