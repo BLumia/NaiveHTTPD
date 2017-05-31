@@ -7,6 +7,8 @@ pipelines:
   default:
     - step:
         script:
+          - apt-get update
+          - apt-get install -y cmake
           - mkdir build && cd $_
           - cmake ..
           - make
