@@ -7,4 +7,6 @@ pipelines:
   default:
     - step:
         script:
+          - mkdir build && cd $_
+          - cmake ..
           - make
