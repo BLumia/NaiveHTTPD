@@ -25,6 +25,9 @@
 
 char WWW_PATH[PATH_MAX];
 int PORT = 8080;
+extern int LOG_LEVEL;
+extern FileType typeArr[];
+extern StatusCode statusArr[];
 
 void processArguments(int argc, char **argv) {
 	int opt;
