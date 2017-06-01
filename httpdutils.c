@@ -216,7 +216,7 @@ RequestHeader* readRequestHeader(int socketfd) {
 	ssize_t readSize;
 	RequestHeader* ret;
 	ret = malloc(sizeof(RequestHeader));
-	char buffer[BUFFER_SIZE+1], buffer2[BUFFER_SIZE+1];
+	char buffer[BUFFER_SIZE+1];
 	
 	readSize = fdgets(socketfd,buffer,BUFFER_SIZE);
 	if(readSize <= 0) {
