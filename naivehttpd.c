@@ -25,7 +25,8 @@ void processArguments(int argc, char **argv) {
 			case 'h': case 'H':
 				printf("hint: naivehttpd -D/var/www/html -p80\n\n"
 					"\tNaive HTTPD is a naive web server\n\n");  fflush(stdout);
-				break;
+				exit(0);
+				break; // :P
 			case 'v': case 'V':
 				LOG_LEVEL = 2;
 				printf("Verbose log enabled\n"); fflush(stdout);
@@ -157,6 +158,7 @@ int main (int argc, char *argv[]) {
                     /* Write the reply to connection */
                     printf("Writing request: %s\n", reqHdr->url);
                     doResponse(activeEvtPool[i].data.fd, reqHdr);
+                    done = 1;
                 }
 
                 if (done) {

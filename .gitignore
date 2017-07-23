@@ -2,3 +2,16 @@
 *.o
 *.dll
 *.exe
+NaiveHTTPD
+
+# Folders
+.vscode/
+
+# Cache
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+
+# Files for test
+*.html

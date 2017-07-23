@@ -39,7 +39,7 @@ void fireError(int socketfd, int statusCode) {
 		if (statusArr[i].code == statusCode) statusStr = statusArr[i].desc;
 	}
 	
-	sprintf(buffer,"HTTP/1.0 %d %s\r\nContent-Type: text/html\r\nContent-Length: 4\r\n\r\n%d\n", statusCode, statusStr, statusCode);
+	sprintf(buffer,"HTTP/1.0 %d %s\r\nContent-Type: text/html\r\nContent-Length: 4\r\nConnection: close\r\n\r\n%d\n", statusCode, statusStr, statusCode);
 	write(socketfd,buffer,strlen(buffer));
 }
 
@@ -153,7 +153,7 @@ void doResponse(int socketfd, RequestHeader* reqHdr) {
 	if (LOG_LEVEL >= 2) {
 		printf("Responsed one hit, [%s]!\n", buffer); fflush(stdout);
 	}
-	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n\r\n", contentTypeStr, fileStat.st_size);
+	sprintf(buffer,"HTTP/1.0 200 OK\r\nContent-Type: %s\r\nConnection: close\r\nContent-Length: %ld\r\n\r\n", contentTypeStr, fileStat.st_size);
 	write(socketfd,buffer,strlen(buffer));
 	while ((bufferSize = read(filefd, buffer, BUFFER_SIZE)) > 0 ) {
 		write(socketfd, buffer, bufferSize);
